@@ -193,6 +193,7 @@ ssize_t _fpmaxtostr(FILE * fp, __fpmax_t x, struct printf_info *info,
 	int ndb = NUM_DIGIT_BLOCKS;
 	int nd = DECIMAL_DIG;
 	int sufficient_precision = 0;
+	int non_zero_digits = 0;
 #endif /* __UCLIBC_HAS_HEXADECIMAL_FLOATS__ */
 #ifdef __UCLIBC_HAS_GLIBC_DIGIT_GROUPING__
 	int num_groups = 0;
@@ -373,7 +374,12 @@ ssize_t _fpmaxtostr(FILE * fp, __fpmax_t x, struct printf_info *info,
 			s += dpb;
 			j = 0;
 			do {
-				s[- ++j] = '0' + (digit_block % base);
+				uint_fast32_t digit = (digit_block % base);
+
+				s[- ++j] = '0' + digit;
+#ifdef __UCLIBC_HAS_HEXADECIMAL_FLOATS__
+				non_zero_digits += digit > 0;
+#endif
 				digit_block /= base;
 			} while (j < dpb);
 		} while (++i < ndb);
@@ -532,11 +538,11 @@ ssize_t _fpmaxtostr(FILE * fp, __fpmax_t x, struct printf_info *info,
 
 		if (PRINT_INFO_FLAG_VAL(info,alt)
 			|| (i)
-			|| ((o_mode != 'g')
+			|| ((o_mode == 'e' || o_mode == 'f') && (preci > 0))
 #ifdef __UCLIBC_HAS_HEXADECIMAL_FLOATS__
-				&& (o_mode != 'a')
+			|| ((o_mode == 'a')
+			    && ((info->prec < 0 && non_zero_digits > 1) || info->prec > 0))
 #endif /* __UCLIBC_HAS_HEXADECIMAL_FLOATS__ */
-				&& (preci > 0))
 			) {
 			ppc[0] = FPO_STR_PREC;
 #ifdef __LOCALE_C_ONLY
@@ -636,7 +642,8 @@ ssize_t _fpmaxtostr(FILE * fp, __fpmax_t x, struct printf_info *info,
 		ppc[2] = (intptr_t) sign_str;
 
 #ifdef __UCLIBC_HAS_HEXADECIMAL_FLOATS__
-		if (((mode|0x20) == 'a') && (pc_fwi[3] >= 16)) { /* Hex sign handling. */
+		if (((mode|0x20) == 'a') && (pc_fwi[3] >= 16) &&
+		    (pc_fwi[3] != FPO_STR_PREC)) { /* Hex sign handling. */
 			/* Hex and not inf or nan, so prefix with 0x. */
 			char *h = sign_str + i;
 			*h = '0';
