@@ -48,13 +48,34 @@ static __inline__ _syscall4(int, __semctl, int, semid, int, semnum, int, cmd, vo
 
 int semctl(int semid, int semnum, int cmd, ...)
 {
-    union semun arg;
+    union semun arg = { 0 };
     va_list ap;
 
-    /* Get the argument.  */
-    va_start (ap, cmd);
-    arg = va_arg (ap, union semun);
-    va_end (ap);
+    /* Only these commands take a fourth argument.  Reading it anyway is not
+       free: where the ABI hands a union over by reference, va_arg becomes a
+       load through a pointer the caller never wrote.  */
+    switch (cmd) {
+    case SETVAL:
+    case GETALL:
+    case SETALL:
+    case IPC_STAT:
+    case IPC_SET:
+#ifdef IPC_INFO
+    case IPC_INFO:
+#endif
+#ifdef SEM_STAT
+    case SEM_STAT:
+#endif
+#ifdef SEM_INFO
+    case SEM_INFO:
+#endif
+	va_start (ap, cmd);
+	arg = va_arg (ap, union semun);
+	va_end (ap);
+	break;
+    }
+    if (cmd == IPC_SET && arg.buf != NULL)
+	__ipc_mode_to_kernel(&arg.buf->sem_perm.mode);
 #ifdef __NR_semctl
     int __ret = __semctl(semid, semnum, cmd | __IPC_64, arg.__pad);
 #if (__WORDSIZE == 32) && defined(__UCLIBC_USE_TIME64__)
@@ -66,6 +87,8 @@ int semctl(int semid, int semnum, int cmd, ...)
         arg.buf->sem_ctime = (__time_t)arg.buf->__sem_ctime_internal_1 | (__time_t)(arg.buf->__sem_ctime_internal_2) << 32;
     }
 #endif
+    if ((cmd == IPC_SET || cmd == IPC_STAT) && arg.buf != NULL)
+	__ipc_mode_from_kernel(&arg.buf->sem_perm.mode);
     return __ret;
 #else
 # if defined __sparc__ && defined __arch64__
@@ -77,7 +100,12 @@ int semctl(int semid, int semnum, int cmd, ...)
        on its own, so the bit does not matter.  */
     return __syscall_ipc(IPCOP_semctl, semid, semnum, cmd, arg.__pad, NULL);
 # else
-    return __syscall_ipc(IPCOP_semctl, semid, semnum, cmd|__IPC_64, &arg, NULL);
+    {
+	int __ret = __syscall_ipc(IPCOP_semctl, semid, semnum, cmd|__IPC_64, &arg, NULL);
+	if ((cmd == IPC_SET || cmd == IPC_STAT) && arg.buf != NULL)
+		__ipc_mode_from_kernel(&arg.buf->sem_perm.mode);
+	return __ret;
+    }
 # endif
 #endif
 }
